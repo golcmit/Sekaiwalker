@@ -28,23 +28,30 @@ def fetch_content(url):
     list_tags = soup.find_all("li")
     alltextlist = []
     ressnum = []
-
+    allcontentlist = []
+   
+    A_T_list = []
+    A_H_list = []
     for list_tag in list_tags:
+        a_titles_list =[]
+        a_hrefs_list = []
         part_text = ""
         divs = list_tag.find_all("div")
         if len(divs) > 1:
-            for blockquote in divs[1].find_all("blockquote"):
-                blockquote.decompose()
-
             spans = divs[0].find_all("span")
             num_str = spans[0].text
             num = ''.join(filter(str.isdigit, num_str))
-            p_tags = divs[1].find_all("p")
+            allcontentlist.append(divs[1])
+            p_tags = divs[1].find_all("p",recursive = False)
+            a_tags = divs[1].find_all("a",recursive = True)
             for p in p_tags:
-                for a in p.find_all("a"):
-                    a.decompose()
                 part_text += p.text.strip() + '<br>'
+            for a in a_tags:
+                a_titles_list.append(a.get("title", ""))
+                a_hrefs_list.append(a.get("href",""))
             alltextlist.append(part_text)
+            A_T_list.append(a_titles_list)
+            A_H_list.append(a_hrefs_list)
             ressnum.append(int(num))
 
     effective_list = []
@@ -54,7 +61,7 @@ def fetch_content(url):
         else:
             effective_list.append((text, True))
 
-    return effective_list
+    return allcontentlist,effective_list,A_H_list,A_T_list
 
 
 def fetch_all_content(baselinks):
