@@ -70,10 +70,27 @@ def fetch_all_content(baselinks):
 
     return list(results)
 
+def transform_results(results):
+    # Create empty lists for each category
+    a_list, b_list, c_list, d_list = [], [], [], []
+
+    for result in results:
+        a, b, c, d = result[0], result[1], result[2], result[3]
+        a_list.append(a)
+        b_list.append(b)
+        c_list.append(c)
+        d_list.append(d)
+
+    transformed_results = [a_list, b_list, c_list, d_list]
+    return transformed_results
+
+
+
+
 #valued_list(Rating sorting is not yet implemented.)
-def search_keywords(wordlist,textlist,urllist):
+def search_keywords(wordlist,textlist,namelist,titlelist):
     point_list=[]
-    for i in range(len(urllist)):
+    for i in range(len(textlist)):
         
         for j in range(len(textlist[i])):
             point_counter = 0
@@ -82,16 +99,24 @@ def search_keywords(wordlist,textlist,urllist):
             else:
                 point_mem = []
                 for w in wordlist:
-                    point_mem.append(textlist[i][j][0].count(w))
+                    name_point = 0
+                    title_point =0
+                    for k in namelist[i][j]:
+                        name_point += k.count(w)
+                    for k in titlelist[i][j]:
+                        title_point += k.count(w)
+                    point_mem.append(textlist[i][j][0].count(w)+name_point+title_point)
                 if np.prod(point_mem) != 0:
                     point_counter = 10 * len(wordlist)*sum(point_mem)
+                    point_list.append((point_counter,(i,j)))
+                else:
                     point_list.append((point_counter,(i,j)))
     filtered_list = [t for t in point_list if t[0] != 0]
     return filtered_list
 
 
 #htmlfile
-def generate_html_results(urllist, textlist, valuelist):
+def generate_html_results(urllist, textlist, valuelist,searchword):
     if len(valuelist) > 0:
         referencelist = []
         messagelist = []
@@ -105,7 +130,7 @@ def generate_html_results(urllist, textlist, valuelist):
             stringlist.append(string)
             messagelist.append(f"第{1 + b}スレ{1 + c}レス目")
 
-        html_content = f"<html>\n<head>\n</head>\n<body>\n<h1>{len(valuelist)}件見つかりました</h1><ol>\n"
+        html_content = f"<html>\n<head>\n</head>\n<body>\n<h1>{len(valuelist)}件見つかりました</h1>\n<h3>検索ワード:{searchword}</h3><ol>\n"
         
         for i in range(len(valuelist)):
             html_content += f"<li><p>{stringlist[i]}</p>\n<a href='{referencelist[i]}'>{messagelist[i]}</a></li>\n"
@@ -130,10 +155,13 @@ def main():
         search_word_lst = search_word.split()
         #step1
         baselinks = fetch_urls(initial_url, prefix)
-        textlist = fetch_all_content(baselinks)
+        raw_data = transform_results(fetch_all_content(baselinks))
+        textlist = raw_data[1]
+        addreslist = raw_data[2]
+        titlelist = raw_data[3]
 
-        step2 = search_keywords(search_word_lst, textlist, baselinks)
-        step3 = generate_html_results(baselinks, textlist, step2)
+        step2 = search_keywords(search_word_lst, textlist,addreslist,titlelist)
+        step3 = generate_html_results(baselinks, textlist, step2,search_word)
 
         with open("result.html", "w",encoding='utf-8') as file:
             file.write(step3)
