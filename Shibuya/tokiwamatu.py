@@ -1,13 +1,14 @@
 #あにまん掲示板 Fate×セカイスレ
 
-
 import concurrent.futures
 import requests
 import numpy as np
 from bs4 import BeautifulSoup
 import tkinter as tk
 from tkinter import messagebox
+import sys
 
+memory = []
 #rawlist
 def fetch_urls(initial_url, prefix):
     response = requests.get(initial_url)
@@ -22,53 +23,59 @@ def fetch_urls(initial_url, prefix):
     return baselinks
 
 #textlist
-def fetch_content(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, "html.parser")
-    list_tags = soup.find_all("li")
+def fetch_content(url, save=[]):
+    if len(save) == 0:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, "html.parser")
+        list_tags = soup.find_all("li")
+        allcontentlist = [tag.find_all("div") for tag in list_tags if tag.find_all("div") and len(tag.find_all("div")) > 1]
+    else:
+        allcontentlist = save
+
     alltextlist = []
-    ressnum = []
-    allcontentlist = []
-   
+
     A_T_list = []
     A_H_list = []
-    for list_tag in list_tags:
-        a_titles_list =[]
+
+    for content_list in allcontentlist:
+        content = content_list[1]
+        if type(content) is bool:
+            print("it is!!")
+            print(content[0])
+        a_titles_list = []
         a_hrefs_list = []
         part_text = ""
-        divs = list_tag.find_all("div")
-        if len(divs) > 1:
-            spans = divs[0].find_all("span")
-            num_str = spans[0].text
-            num = ''.join(filter(str.isdigit, num_str))
-            allcontentlist.append(divs[1])
-            p_tags = divs[1].find_all("p",recursive = False)
-            a_tags = divs[1].find_all("a",recursive = True)
-            for p in p_tags:
-                part_text += p.text.strip() + '<br>'
-            for a in a_tags:
-                a_titles_list.append(a.get("title", ""))
-                a_hrefs_list.append(a.get("href",""))
-            alltextlist.append(part_text)
-            A_T_list.append(a_titles_list)
-            A_H_list.append(a_hrefs_list)
-            ressnum.append(int(num))
+        p_tags = content.find_all("p", recursive=False)
+        a_tags = content.find_all("a", recursive=True)
 
-    effective_list = []
-    for text in alltextlist:
-        if text == "このレスは削除されています":
-            effective_list.append((text, False))
-        else:
-            effective_list.append((text, True))
+        for p in p_tags:
+            part_text += p.text.strip() + '<br>'
 
-    return allcontentlist,effective_list,A_H_list,A_T_list
+        for a in a_tags:
+            a_titles_list.append(a.get("title", ""))
+            a_hrefs_list.append(a.get("href", ""))
+
+        alltextlist.append(part_text)
+        A_T_list.append(a_titles_list)
+        A_H_list.append(a_hrefs_list)
+
+    effective_list = [(text, False) if text == "このレスは削除されています" else (text, True) for text in alltextlist]
+
+    return allcontentlist, effective_list, A_H_list, A_T_list
 
 
-def fetch_all_content(baselinks):
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = executor.map(fetch_content, baselinks)
+def fetch_all_content(url_list, save_list=[]):
+    if save_list is None:
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = executor.map(fetch_content, url_list)
+    else:
+        # URLごとに対応するallcontentlistを取得する
+        results = []
+        for url, save in zip(url_list, save_list):
+            result = fetch_content(url, save[0])
+            results.append(result)
 
-    return list(results)
+    return results
 
 def transform_results(results):
     # Create empty lists for each category
@@ -85,13 +92,11 @@ def transform_results(results):
     return transformed_results
 
 
-
-
 #valued_list(Rating sorting is not yet implemented.)
 def search_keywords(wordlist,textlist,namelist,titlelist):
     point_list=[]
     for i in range(len(textlist)):
-        
+
         for j in range(len(textlist[i])):
             point_counter = 0
             if textlist[i][j][1] == False:
@@ -114,7 +119,6 @@ def search_keywords(wordlist,textlist,namelist,titlelist):
     filtered_list = [t for t in point_list if t[0] != 0]
     return filtered_list
 
-
 #htmlfile
 def generate_html_results(urllist, textlist, valuelist,searchword):
     if len(valuelist) > 0:
@@ -131,7 +135,7 @@ def generate_html_results(urllist, textlist, valuelist,searchword):
             messagelist.append(f"第{1 + b}スレ{1 + c}レス目")
 
         html_content = f"<html>\n<head>\n</head>\n<body>\n<h1>{len(valuelist)}件見つかりました</h1>\n<h3>検索ワード:{searchword}</h3><ol>\n"
-        
+
         for i in range(len(valuelist)):
             html_content += f"<li><p>{stringlist[i]}</p>\n<a href='{referencelist[i]}'>{messagelist[i]}</a></li>\n"
         html_content += "</ol>\n</body>\n</html>"
@@ -140,14 +144,12 @@ def generate_html_results(urllist, textlist, valuelist,searchword):
 
     return html_content
 
-
-
-
 def main():
     window = tk.Tk()
     window.title("Fate×セカイ検索ツール")
 
     def search_button_click():
+        global memory
         initial_url = "https://writening.net/page?b6huzw"
         prefix = "https://bbs.animanch.com/board/"
 
@@ -155,7 +157,13 @@ def main():
         search_word_lst = search_word.split()
         #step1
         baselinks = fetch_urls(initial_url, prefix)
-        raw_data = transform_results(fetch_all_content(baselinks))
+
+        if memory is not None:
+            raw_data = transform_results(fetch_all_content(baselinks,save_list=memory))
+        else:
+            raw_data = transform_results(fetch_all_content(baselinks))
+        memory = [data[0] for data in raw_data]
+
         textlist = raw_data[1]
         addreslist = raw_data[2]
         titlelist = raw_data[3]
