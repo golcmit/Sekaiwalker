@@ -1,3 +1,5 @@
+#あにまん掲示板　Fate×セカイスレ
+
 import os
 import json
 import zlib
