@@ -1,190 +1,121 @@
-#あにまん掲示板 Fate×セカイスレ
-
 import concurrent.futures
 import requests
-import numpy as np
 from bs4 import BeautifulSoup
 import tkinter as tk
 from tkinter import messagebox
-import sys
+from typing import List, Tuple, Dict, Union
 
-memory = []
-#rawlist
-def fetch_urls(initial_url, prefix):
-    response = requests.get(initial_url)
+# URLを取得する関数
+def fetch_urls(initial_url: str, prefix: str) -> List[str]:
+    try:
+        response = requests.get(initial_url)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Error fetching URLs: {e}")
+        return []
+
     soup = BeautifulSoup(response.text, "html.parser")
+    return [link.get("href") for link in soup.find_all("a") if link.get("href", "").startswith(prefix)]
 
-    baselinks = []
-    for link in soup.find_all("a"):
-        href = link.get("href")
-        if href and href.startswith(prefix):
-            baselinks.append(href)
-
-    return baselinks
-
-#textlist
-def fetch_content(url, save=[]):
-    if len(save) == 0:
+# コンテンツを取得する関数
+def fetch_content(url: str) -> Tuple[List[BeautifulSoup], List[Tuple[str, bool]], List[List[str]], List[List[str]]]:
+    try:
         response = requests.get(url)
-        soup = BeautifulSoup(response.content, "html.parser")
-        list_tags = soup.find_all("li")
-        allcontentlist = [tag.find_all("div") for tag in list_tags if tag.find_all("div") and len(tag.find_all("div")) > 1]
-    else:
-        allcontentlist = save
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Error fetching content from {url}: {e}")
+        return [], [], [], []
 
-    alltextlist = []
+    soup = BeautifulSoup(response.content, "html.parser")
+    list_tags = soup.find_all("li")
 
-    A_T_list = []
-    A_H_list = []
+    all_content, effective_texts, a_title_list, a_href_list = [], [], [], []
+    
+    for tag in list_tags:
+        divs = tag.find_all("div")
+        if len(divs) > 1:
+            num_str = divs[0].find_all("span")[0].text
+            num = int(''.join(filter(str.isdigit, num_str)))
 
-    for content_list in allcontentlist:
-        content = content_list[1]
-        if type(content) is bool:
-            print("it is!!")
-            print(content[0])
-        a_titles_list = []
-        a_hrefs_list = []
-        part_text = ""
-        p_tags = content.find_all("p", recursive=False)
-        a_tags = content.find_all("a", recursive=True)
+            all_content.append(divs[1])
+            part_text = "<br>".join(p.text.strip() for p in divs[1].find_all("p", recursive=False))
+            a_titles = [a.get("title", "") for a in divs[1].find_all("a", recursive=True)]
+            a_hrefs = [a.get("href", "") for a in divs[1].find_all("a", recursive=True)]
 
-        for p in p_tags:
-            part_text += p.text.strip() + '<br>'
+            all_content.append(divs[1])
+            effective_texts.append((part_text, part_text != "このレスは削除されています"))
+            a_title_list.append(a_titles)
+            a_href_list.append(a_hrefs)
 
-        for a in a_tags:
-            a_titles_list.append(a.get("title", ""))
-            a_hrefs_list.append(a.get("href", ""))
+    return all_content, effective_texts, a_href_list, a_title_list
 
-        alltextlist.append(part_text)
-        A_T_list.append(a_titles_list)
-        A_H_list.append(a_hrefs_list)
+def fetch_all_content(urls: List[str]) -> List[Tuple[List[BeautifulSoup], List[Tuple[str, bool]], List[List[str]], List[List[str]]]]:
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        return list(executor.map(fetch_content, urls))
 
-    effective_list = [(text, False) if text == "このレスは削除されています" else (text, True) for text in alltextlist]
+# 検索結果をHTMLに変換する関数
+def generate_html_results(urllist: List[str], textlist: List[List[Tuple[str, bool]]], valuelist: List[Tuple[int, Tuple[int, int]]], searchword: str) -> str:
+    if not valuelist:
+        return "<html>\n<head>\n</head>\n<body>\n<h1>There seems to be nothing here.</h1>\n</body>\n</html>"
 
-    return allcontentlist, effective_list, A_H_list, A_T_list
+    html_content = f"<html>\n<head>\n</head>\n<body>\n<h1>{len(valuelist)}件見つかりました</h1>\n<h3>検索ワード: {searchword}</h3><ol>\n"
+    
+    for points, (i, j) in valuelist:
+        url = f"{urllist[i]}?res={j + 1}"
+        text, _ = textlist[i][j]
+        html_content += f"<li><p>{text}</p>\n<a href='{url}'>第{i + 1}スレ{j + 1}レス目</a></li>\n"
 
-
-def fetch_all_content(url_list, save_list=[]):
-    if save_list is None:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            results = executor.map(fetch_content, url_list)
-    else:
-        # URLごとに対応するallcontentlistを取得する
-        results = []
-        for url, save in zip(url_list, save_list):
-            result = fetch_content(url, save[0])
-            results.append(result)
-
-    return results
-
-def transform_results(results):
-    # Create empty lists for each category
-    a_list, b_list, c_list, d_list = [], [], [], []
-
-    for result in results:
-        a, b, c, d = result[0], result[1], result[2], result[3]
-        a_list.append(a)
-        b_list.append(b)
-        c_list.append(c)
-        d_list.append(d)
-
-    transformed_results = [a_list, b_list, c_list, d_list]
-    return transformed_results
-
-
-#valued_list(Rating sorting is not yet implemented.)
-def search_keywords(wordlist,textlist,namelist,titlelist):
-    point_list=[]
-    for i in range(len(textlist)):
-
-        for j in range(len(textlist[i])):
-            point_counter = 0
-            if textlist[i][j][1] == False:
-                point_list.append((0,(i,j)))
-            else:
-                point_mem = []
-                for w in wordlist:
-                    name_point = 0
-                    title_point =0
-                    for k in namelist[i][j]:
-                        name_point += k.count(w)
-                    for k in titlelist[i][j]:
-                        title_point += k.count(w)
-                    point_mem.append(textlist[i][j][0].count(w)+name_point+title_point)
-                if np.prod(point_mem) != 0:
-                    point_counter = 10 * len(wordlist)*sum(point_mem)
-                    point_list.append((point_counter,(i,j)))
-                else:
-                    point_list.append((point_counter,(i,j)))
-    filtered_list = [t for t in point_list if t[0] != 0]
-    return filtered_list
-
-#htmlfile
-def generate_html_results(urllist, textlist, valuelist,searchword):
-    if len(valuelist) > 0:
-        referencelist = []
-        messagelist = []
-        stringlist = []
-        for i in range(len(valuelist)):
-            b = valuelist[i][1][0]
-            c = valuelist[i][1][1]
-            url = urllist[b] + f"?res={1 + c}"
-            referencelist.append(url)
-            string = textlist[b][c][0]
-            stringlist.append(string)
-            messagelist.append(f"第{1 + b}スレ{1 + c}レス目")
-
-        html_content = f"<html>\n<head>\n</head>\n<body>\n<h1>{len(valuelist)}件見つかりました</h1>\n<h3>検索ワード:{searchword}</h3><ol>\n"
-
-        for i in range(len(valuelist)):
-            html_content += f"<li><p>{stringlist[i]}</p>\n<a href='{referencelist[i]}'>{messagelist[i]}</a></li>\n"
-        html_content += "</ol>\n</body>\n</html>"
-    else:
-        html_content = "<html>\n<head>\n</head>\n<body>\n<h1>There seems to be nothing here.</h1>\n</body>\n</html>"
-
+    html_content += "</ol>\n</body>\n</html>"
     return html_content
 
-def main():
+# 検索ワードに基づくスコアリング
+def search_keywords(wordlist: List[str], textlist: List[List[Tuple[str, bool]]], namelist: List[List[List[str]]], titlelist: List[List[List[str]]]) -> List[Tuple[int, Tuple[int, int]]]:
+    results = []
+    
+    for i, sublist in enumerate(textlist):
+        for j, (text, valid) in enumerate(sublist):
+            if not valid:
+                results.append((0, (i, j)))
+                continue
+
+            score = sum(
+                text.count(word) + sum(name.count(word) for name in namelist[i][j]) + sum(title.count(word) for title in titlelist[i][j])
+                for word in wordlist
+            )
+            if score > 0:
+                results.append((10 * len(wordlist) * score, (i, j)))
+
+    return [res for res in results if res[0] > 0]
+
+def main() -> None:
     window = tk.Tk()
     window.title("Fate×セカイ検索ツール")
 
-    def search_button_click():
-        global memory
+    def search_button_click() -> None:
         initial_url = "https://writening.net/page?b6huzw"
         prefix = "https://bbs.animanch.com/board/"
 
-        search_word = word_input()
+        search_word = entry.get()
         search_word_lst = search_word.split()
-        #step1
+
         baselinks = fetch_urls(initial_url, prefix)
+        raw_data = fetch_all_content(baselinks)
+        textlist = [x[1] for x in raw_data]
+        namelist = [x[2] for x in raw_data]
+        titlelist = [x[3] for x in raw_data]
 
-        if memory is not None:
-            raw_data = transform_results(fetch_all_content(baselinks,save_list=memory))
-        else:
-            raw_data = transform_results(fetch_all_content(baselinks))
-        memory = [data[0] for data in raw_data]
+        results = search_keywords(search_word_lst, textlist, namelist, titlelist)
+        html_content = generate_html_results(baselinks, textlist, results, search_word)
 
-        textlist = raw_data[1]
-        addreslist = raw_data[2]
-        titlelist = raw_data[3]
-
-        step2 = search_keywords(search_word_lst, textlist,addreslist,titlelist)
-        step3 = generate_html_results(baselinks, textlist, step2,search_word)
-
-        with open("result.html", "w",encoding='utf-8') as file:
-            file.write(step3)
+        with open("result.html", "w", encoding='utf-8') as file:
+            file.write(html_content)
 
         messagebox.showinfo('Finished', 'HTML file created successfully.')
 
-    # 画面サイズの取得
+    # ウィンドウサイズの設定
     screen_width = window.winfo_screenwidth()
     screen_height = window.winfo_screenheight()
-
-    # ウィンドウサイズの設定
-    window_width = 600
-    window_height = 300
-
-    # ウィンドウを画面中央に配置
+    window_width, window_height = 600, 300
     x = (screen_width - window_width) // 2
     y = (screen_height - window_height) // 2
     window.geometry(f"{window_width}x{window_height}+{x}+{y}")
@@ -193,23 +124,15 @@ def main():
     frame = tk.Frame(window)
     frame.pack(pady=20)
 
-    # 入力ラベルの作成
     label = tk.Label(frame, text="検索したいワードを入力してください：")
     label.pack()
 
-    # 入力エントリーの作成
     entry = tk.Entry(frame, width=60)
     entry.pack()
 
-    # ボタンの作成
     button = tk.Button(window, text="検索", command=search_button_click)
     button.pack(pady=10)
 
-    def word_input():
-        input_text = entry.get()
-        return input_text
-
-    # メインループの開始
     window.mainloop()
 
 if __name__ == '__main__':
